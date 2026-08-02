@@ -1,10 +1,12 @@
 from fastapi import FastAPI, HTTPException
 from datetime import datetime
 import zoneinfo
+from app.db import SessionDep, creaate_all_tables
 from .models import Customer, CustomerCreate, Invoice, Transaction
+from sqlmodel import select
 
 
-app = FastAPI(title="learn_fastAPI")
+app = FastAPI(title="learn_fastAPI", lifespan=creaate_all_tables)
 
 COUNTRIES_TIMEZONES = {
     "US": "America/New_York",
@@ -19,10 +21,6 @@ COUNTRIES_TIMEZONES = {
     "BR": "America/Sao_Paulo",
     "CO": "America/Bogota",
 }
-
-db_customers: list[Customer] = []
-
-
 
 
 # default
@@ -50,24 +48,25 @@ async def hora(iso_code: str):
     }
 
 # customers
+@app.post("/customers", response_model=Customer)
+async def create_customer(customer_data: CustomerCreate, session: SessionDep):
+    customer = Customer.model_validate(customer_data.model_dump())
+    session.add(customer)
+    session.commit()
+    session.refresh(customer)
+    return customer
+
 @app.get("/customers", response_model=list[Customer])
-async def list_customer():
-    return db_customers
+async def list_customer(session: SessionDep):
+    return session.exec(select(Customer)).all()
 
 @app.get("/customers/{id}", response_model=Customer)
-async def customer(id: int):
-    for cust in db_customers:
-        if cust.id == id:
-            return cust
-    raise HTTPException(status_code=404, detail="Customer not found")
-
-@app.post("/customers", response_model=Customer)
-async def create_customer(customer_data: CustomerCreate):
-    customer = Customer.model_validate(customer_data.model_dump())
-    # DB
-    customer.id = len(db_customers) + 1
-    db_customers.append(customer)
+async def customer(id: int, session: SessionDep):
+    customer = session.exec(select(Customer).where(Customer.id == id)).first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
     return customer
+
 
 # transactions
 @app.post("/transactions")
